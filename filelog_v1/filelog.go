@@ -41,8 +41,24 @@ func New(Folder string, Date string) *uFileLog {
 	}
 }
 
-// 函数2：读取位置
+// 函数2：关闭释放
+func (Me *uFileLog) Close() {
+	if Me.indexFp != nil {
+		_ = Me.indexFp.Close()
+	}
+	for _, v := range Me.dataFps {
+		_ = v.Close()
+	}
+	Me.indexFp = nil
+	Me.dataFps = nil
+	Me.AutoId = -2
+}
+
+// 函数3：读取位置
 func (Me *uFileLog) GetAutoId() (int64, error) {
+	if Me.AutoId == -2 {
+		return -1, errors.New("实例已关闭")
+	}
 	// 还没有位置，需要从文件读取
 	if Me.AutoId == -1 {
 		if err := Me.initAutoId(); err != nil {
@@ -52,8 +68,12 @@ func (Me *uFileLog) GetAutoId() (int64, error) {
 	return Me.AutoId, nil
 }
 
-// 函数3：新增一条日志
+// 函数4：新增一条日志
 func (Me *uFileLog) Add(DataType int16, Data []byte) (int64, error) {
+	if Me.AutoId == -2 {
+		return -1, errors.New("实例已关闭")
+	}
+
 	var err error
 	// AutoId变量判断处理
 	if Me.AutoId == -1 {
@@ -110,8 +130,12 @@ func (Me *uFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	return Me.AutoId, nil
 }
 
-// 函数4：读取一条数据
+// 函数5：读取一条数据
 func (Me *uFileLog) GetOne(Id int64) (*UData, error) {
+	if Me.AutoId == -2 {
+		return nil, errors.New("实例已关闭")
+	}
+
 	// 索引文件句柄判断
 	if Me.indexFp == nil {
 		if err := Me.initFpIndex(); err != nil {

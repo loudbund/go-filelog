@@ -46,4 +46,6 @@ func scan() {
 		fmt.Println(index, D.DataType, string(D.Data), err)
 		index++
 	}
+	handle.Close()
+	fmt.Println(handle.GetOne(0))
 }
