@@ -12,8 +12,11 @@ import (
 
 // 结构体1: 读取内容的结构体
 type UData struct {
-	DataType int16  // 数据类型
-	Data     []byte // 数据内容
+	Id         int64  // 流水号
+	DataType   int16  // 数据类型
+	DataLength int32  // 内容长度
+	DataOffset int64  // 相对存储文件偏移量
+	Data       []byte // 内容
 }
 
 // 结构体2： 日志操作结构体
@@ -184,8 +187,11 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 	}
 
 	return &UData{
-		DataType: KeyDataType,
-		Data:     KeyDataBuff,
+		Id:         Id,
+		Data:       KeyDataBuff,
+		DataType:   KeyDataType,
+		DataOffset: KeyOffset,
+		DataLength: KeyDataLength,
 	}, nil
 }
 
