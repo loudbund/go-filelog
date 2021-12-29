@@ -188,10 +188,10 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 
 	return &UData{
 		Id:         Id,
-		Data:       KeyDataBuff,
 		DataType:   KeyDataType,
-		DataOffset: KeyOffset,
 		DataLength: KeyDataLength,
+		DataOffset: KeyOffset,
+		Data:       KeyDataBuff,
 	}, nil
 }
 
