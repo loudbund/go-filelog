@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 )
 
+// 索引数据加密
 func utilsEncodeUDiskIndex(Data *UDiskIndex) []byte {
 	b := bytes.NewBuffer([]byte{})
 	b.Write(utilsInt16ToBytes(Data.DataFileIndex)) // 索引文件序号
@@ -12,25 +13,33 @@ func utilsEncodeUDiskIndex(Data *UDiskIndex) []byte {
 	b.Write(utilsInt16ToBytes(Data.DataType))      // 数据内容类型
 	return b.Bytes()
 }
+
+// 索引数据解密
 func utilsDecodeUDiskIndex(Bytes []byte) *UDiskIndex {
 	return &UDiskIndex{
 		DataFileIndex: int16(binary.BigEndian.Uint16(Bytes[:2])),
-		DataOffset:    int64(binary.BigEndian.Uint16(Bytes[2:10])),
+		DataOffset:    int64(binary.BigEndian.Uint64(Bytes[2:10])),
 		DataType:      int16(binary.BigEndian.Uint16(Bytes[10:12])),
 	}
 }
+
+// 内容数据加密
 func utilsEncodeUDiskData(Data *UDiskData) []byte {
 	b := bytes.NewBuffer([]byte{})
-	b.Write(utilsInt16ToBytes(Data.DataStart))  // 索引文件序号
+	b.Write(utilsInt16ToBytes(Data.DataStart))  // 数据文件定位
+	b.Write(utilsInt32ToBytes(Data.Time))       // 时间戳(秒级)
 	b.Write(utilsInt32ToBytes(Data.DataLength)) // 存储文件偏移量
-	b.Write(Data.Data)                          // 数据内容类型
+	b.Write(Data.Data)                          // 内容长度
 	return b.Bytes()
 }
+
+// 内容数据解密
 func utilsDecodeUDiskData(Bytes []byte) *UDiskData {
 	return &UDiskData{
 		DataStart:  int16(binary.BigEndian.Uint16(Bytes[:2])),
-		DataLength: int32(binary.BigEndian.Uint16(Bytes[2:6])),
-		Data:       Bytes[6:],
+		Time:       int32(binary.BigEndian.Uint32(Bytes[2:6])),
+		DataLength: int32(binary.BigEndian.Uint32(Bytes[6:10])),
+		Data:       Bytes[10:],
 	}
 }
 

@@ -23,7 +23,7 @@ func write() {
 
 	// 2、循环写入一批数据
 	for i := 0; i < 11; i++ {
-		_, err := handle.Add(31, []byte(time.Now().Format("2006-01-02 15:04:05")))
+		_, err := handle.Add(int32(time.Now().Unix()), 31, []byte(time.Now().Format("2006-01-02 15:04:05")))
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -34,6 +34,8 @@ func write() {
 func scan() {
 	// 1、获取句柄
 	handle := filelog_v1.New("/tmp/test-filelog/", time.Now().Format("2006-01-02"))
+
+	fmt.Println("index", "Date", "Time", "Id", "DataFileIndex", "DataOffset", "DataLength", "DataType", "Data", "err")
 
 	// 2、遍历所有数据
 	index := int64(0)
@@ -46,7 +48,7 @@ func scan() {
 		if D == nil {
 			break
 		}
-		fmt.Println(index, D.Id, D.DataFileIndex, D.DataOffset, D.DataLength, D.DataType, string(D.Data), err)
+		fmt.Println(index, D.Date, D.Time, D.Id, D.DataFileIndex, D.DataOffset, D.DataLength, D.DataType, string(D.Data), err)
 		index++
 	}
 	handle.Close()

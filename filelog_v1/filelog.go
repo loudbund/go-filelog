@@ -13,6 +13,7 @@ import (
 // 结构体1: 数据-读取内容的结构体
 type UDataSend struct {
 	Date          string // 日期:2021-12-12
+	Time          int32  // 时间戳(秒级)
 	Id            int64  // 流水号，从0开始
 	DataFileIndex int16  // 数据文件序号
 	DataOffset    int64  // 相对存储文件偏移量
@@ -30,8 +31,9 @@ type UDiskIndex struct {
 
 // 结构体2: 数据-内容数据存储结构体
 type UDiskData struct {
-	DataStart  int16  // 0:2 数据文件定位
-	DataLength int32  // 2:6 内容长度
+	DataStart  int16  // 0:2  数据文件定位
+	Time       int32  // 2:6  时间戳(秒级)
+	DataLength int32  // 6:10 内容长度
 	Data       []byte //
 }
 
@@ -97,7 +99,7 @@ func (Me *CFileLog) GetAutoId() (int64, error) {
 }
 
 // 函数4：新增一条日志
-func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
+func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) {
 	if Me.AutoId == -2 {
 		return -1, errors.New("实例已关闭")
 	}
@@ -137,6 +139,7 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	} else {
 		b := utilsEncodeUDiskData(&UDiskData{
 			DataStart:  Me.DataStart,
+			Time:       Time,
 			DataLength: int32(KeyDataLength),
 			Data:       Data,
 		})
@@ -161,7 +164,7 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	}
 	// fmt.Println(KeyDataFileIndex, Me.DataOffset, DataType, int32(KeyDataLen))
 
-	Me.DataOffset += int64(KeyDataLength) + 6
+	Me.DataOffset += int64(KeyDataLength) + 10
 	Me.AutoId++
 
 	return Me.AutoId, nil
@@ -212,14 +215,14 @@ func (Me *CFileLog) GetOne(Id int64) (*UDataSend, error) {
 			log.Panic("取数据内容seek失败：" + err.Error())
 			return nil, errors.New("内容文件指针移位失败+" + err.Error())
 		} else {
-			Buff, err := Me.fileReadLength(Me.dataFps[KeyUDiskIndex.DataFileIndex], 6)
+			Buff, err = Me.fileReadLength(Me.dataFps[KeyUDiskIndex.DataFileIndex], 10)
 			if err != nil {
 				return nil, errors.New("内容文件内容读取失败+" + err.Error())
 			}
 			if DataStart := utilsBytes2Int16(Buff[:2]); DataStart != Me.DataStart {
 				log.Panic("读取内容数据校验码失败")
 			}
-			Length = utilsBytes2Int32(Buff[2:6])
+			Length = utilsBytes2Int32(Buff[6:10])
 		}
 
 		// 读取内容
@@ -230,9 +233,9 @@ func (Me *CFileLog) GetOne(Id int64) (*UDataSend, error) {
 		}
 
 	}
-
 	return &UDataSend{
 		Date:          Me.date,
+		Time:          KeyUDiskData.Time,
 		Id:            Id,
 		DataFileIndex: KeyUDiskIndex.DataFileIndex,
 		DataOffset:    KeyUDiskIndex.DataOffset,
@@ -318,7 +321,7 @@ func (Me *CFileLog) initAutoId() error {
 		if D, err := Me.GetOne(Me.AutoId - 1); err != nil {
 			log.Panic("初始化读取当前AutoId数据失败：" + err.Error())
 		} else {
-			Me.DataOffset = D.DataOffset
+			Me.DataOffset = D.DataOffset + int64(D.DataLength) + 10
 		}
 	}
 
