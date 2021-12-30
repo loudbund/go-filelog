@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
 	"strings"
@@ -33,6 +34,8 @@ type CFileLog struct {
 	date        string // 日期:2021-12-12
 	folderLog   string // 日志文件所在目录
 	rowsPerFile int64  // 单个数据文件最大行数
+
+	DataStart int16 // 数据文件定位
 }
 
 // 函数1：获取日志操作实例
@@ -48,6 +51,8 @@ func New(Folder string, Date string) *CFileLog {
 		date:        Date,
 		folderLog:   Folder,
 		rowsPerFile: 1000000,
+
+		DataStart: 19334,
 	}
 }
 
@@ -112,8 +117,21 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	// 内容长度
 	KeyDataLen := len(Data)
 
+	// 写数据
+	if _, err = Me.dataFps[KeyDataFileIndex].Seek(Me.DataOffset, 0); err != nil {
+		log.Panic("写数据数据seek失败：" + err.Error())
+		return -1, err
+	} else {
+		D := utilsInt16ToBytes(Me.DataStart)
+		D = append(D, Data...)
+		if _, err := Me.dataFps[KeyDataFileIndex].Write(D); err != nil {
+			return -1, err
+		}
+	}
+
 	// 写入索引
 	if _, err = Me.indexFp.Seek(Me.AutoId*16, 0); err != nil {
+		log.Panic("写数据索引seek失败：" + err.Error())
 		return -1, err
 	} else {
 		b := bytes.NewBuffer([]byte{})
@@ -127,16 +145,7 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	}
 	// fmt.Println(KeyDataFileIndex, Me.DataOffset, DataType, int32(KeyDataLen))
 
-	// 写数据
-	if _, err = Me.dataFps[KeyDataFileIndex].Seek(Me.DataOffset, 0); err != nil {
-		return -1, err
-	} else {
-		if _, err := Me.dataFps[KeyDataFileIndex].Write(Data); err != nil {
-			return -1, err
-		}
-		Me.DataOffset += int64(KeyDataLen)
-	}
-
+	Me.DataOffset += int64(KeyDataLen) + 2
 	Me.AutoId++
 
 	return Me.AutoId, nil
@@ -161,6 +170,7 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 	var KeyDataLength int32
 	var KeyOffset int64
 	if _, err := Me.indexFp.Seek(Id*16, 0); err != nil {
+		log.Panic("取数据索引seek失败：" + err.Error())
 		return nil, errors.New("索引文件指针移位失败+" + err.Error())
 	} else {
 		buff, err := Me.fileReadLength(Me.indexFp, 16)
@@ -188,13 +198,18 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 		}
 		// 读取文件内容
 		if _, err := Me.dataFps[fN].Seek(KeyOffset, 0); err != nil {
+			log.Panic("取数据内容seek失败：" + err.Error())
 			return nil, errors.New("内容文件指针移位失败+" + err.Error())
 		}
-		buff, err := Me.fileReadLength(Me.dataFps[fN], int(KeyDataLength))
+		buff, err := Me.fileReadLength(Me.dataFps[fN], int(KeyDataLength)+2)
 		if err != nil {
 			return nil, errors.New("内容文件内容读取失败+" + err.Error())
 		}
-		KeyDataBuff = buff
+		DataStart := utilsBytes2Int16(buff[:2])
+		if DataStart != Me.DataStart {
+			log.Panic("读取内容数据校验码失败")
+		}
+		KeyDataBuff = buff[2:]
 	}
 
 	return &UData{
@@ -218,7 +233,7 @@ func (Me *CFileLog) initFpData(index int16) error {
 
 	// 打开内容文件
 	f := folderDate + "/data" + strings.Repeat("0", 6-len(strconv.Itoa(int(index)))) + strconv.Itoa(int(index))
-	fp, err := os.OpenFile(f, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644) // 打开文件
+	fp, err := os.OpenFile(f, os.O_RDWR|os.O_CREATE, 0644) // 打开文件
 	if err != nil {
 		return err
 	}
@@ -241,7 +256,7 @@ func (Me *CFileLog) initAutoId() error {
 		Me.DataOffset = 0
 	} else {
 		if D, err := Me.GetOne(Me.AutoId - 1); err != nil {
-			fmt.Println("初始化读取当前AutoId数据失败", err)
+			log.Panic("初始化读取当前AutoId数据失败：" + err.Error())
 		} else {
 			Me.DataOffset = D.DataOffset
 		}
