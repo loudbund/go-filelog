@@ -1,18 +1,17 @@
 package filelog_v1
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// 结构体1: 读取内容的结构体
-type UData struct {
+// 结构体1: 数据-读取内容的结构体
+type UDataSend struct {
 	Date          string // 日期:2021-12-12
 	Id            int64  // 流水号，从0开始
 	DataFileIndex int16  // 数据文件序号
@@ -22,7 +21,21 @@ type UData struct {
 	Data          []byte // 内容
 }
 
-// 结构体2： 日志操作结构体
+// 结构体2: 数据-索引存储结构体
+type UDiskIndex struct {
+	DataFileIndex int16 // 0:2   数据文件序号
+	DataOffset    int64 // 2:10  存储文件偏移量
+	DataType      int16 // 10:12 数据类型
+}
+
+// 结构体2: 数据-内容数据存储结构体
+type UDiskData struct {
+	DataStart  int16  // 0:2 数据文件定位
+	DataLength int32  // 2:6 内容长度
+	Data       []byte //
+}
+
+// 结构体4： 类-日志操作结构体
 type CFileLog struct {
 	AutoId        int64 // 当前流水id，从0开始
 	DataFileIndex int16 // 当前数据文件序号
@@ -115,44 +128,47 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	}
 
 	// 内容长度
-	KeyDataLen := len(Data)
+	KeyDataLength := len(Data)
 
 	// 写数据
 	if _, err = Me.dataFps[KeyDataFileIndex].Seek(Me.DataOffset, 0); err != nil {
 		log.Panic("写数据数据seek失败：" + err.Error())
 		return -1, err
 	} else {
-		D := utilsInt16ToBytes(Me.DataStart)
-		D = append(D, Data...)
-		if _, err := Me.dataFps[KeyDataFileIndex].Write(D); err != nil {
+		b := utilsEncodeUDiskData(&UDiskData{
+			DataStart:  Me.DataStart,
+			DataLength: int32(KeyDataLength),
+			Data:       Data,
+		})
+		if _, err := Me.dataFps[KeyDataFileIndex].Write(b); err != nil {
 			return -1, err
 		}
 	}
 
 	// 写入索引
-	if _, err = Me.indexFp.Seek(Me.AutoId*16, 0); err != nil {
+	if _, err = Me.indexFp.Seek(Me.AutoId*12, 0); err != nil {
 		log.Panic("写数据索引seek失败：" + err.Error())
 		return -1, err
 	} else {
-		b := bytes.NewBuffer([]byte{})
-		b.Write(utilsInt16ToBytes(KeyDataFileIndex))  // 索引文件序号
-		b.Write(utilsInt64ToBytes(Me.DataOffset))     // 存储文件偏移量
-		b.Write(utilsInt16ToBytes(DataType))          // 数据内容类型
-		b.Write(utilsInt32ToBytes(int32(KeyDataLen))) // 数据长度
-		if _, err := Me.indexFp.Write(b.Bytes()); err != nil {
+		b := utilsEncodeUDiskIndex(&UDiskIndex{
+			DataFileIndex: KeyDataFileIndex, // 索引文件序号
+			DataOffset:    Me.DataOffset,    // 存储文件偏移量
+			DataType:      DataType,         // 数据内容类型
+		})
+		if _, err := Me.indexFp.Write(b); err != nil {
 			return -1, err
 		}
 	}
 	// fmt.Println(KeyDataFileIndex, Me.DataOffset, DataType, int32(KeyDataLen))
 
-	Me.DataOffset += int64(KeyDataLen) + 2
+	Me.DataOffset += int64(KeyDataLength) + 6
 	Me.AutoId++
 
 	return Me.AutoId, nil
 }
 
 // 函数5：读取一条数据
-func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
+func (Me *CFileLog) GetOne(Id int64) (*UDataSend, error) {
 	if Me.AutoId == -2 {
 		return nil, errors.New("实例已关闭")
 	}
@@ -165,15 +181,12 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 	}
 
 	// 获取索引
-	var KeyDataFileIndex int16
-	var KeyDataType int16
-	var KeyDataLength int32
-	var KeyOffset int64
-	if _, err := Me.indexFp.Seek(Id*16, 0); err != nil {
+	var KeyUDiskIndex *UDiskIndex
+	if _, err := Me.indexFp.Seek(Id*12, 0); err != nil {
 		log.Panic("取数据索引seek失败：" + err.Error())
 		return nil, errors.New("索引文件指针移位失败+" + err.Error())
 	} else {
-		buff, err := Me.fileReadLength(Me.indexFp, 16)
+		buff, err := Me.fileReadLength(Me.indexFp, 12)
 		if err != nil {
 			if err.Error() == "EOF" {
 				return nil, nil
@@ -181,46 +194,93 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 				return nil, errors.New("索引文件内容读取失败+" + err.Error())
 			}
 		}
-		KeyDataFileIndex = int16(binary.BigEndian.Uint16(buff[:2]))
-		KeyOffset = int64(binary.BigEndian.Uint64(buff[2:10]))
-		KeyDataType = int16(binary.BigEndian.Uint16(buff[10:12]))
-		KeyDataLength = int32(binary.BigEndian.Uint32(buff[12:16]))
+		KeyUDiskIndex = utilsDecodeUDiskIndex(buff)
 	}
 
 	// 内容文件句柄
-	var KeyDataBuff []byte
+	KeyUDiskData := &UDiskData{}
 	if true {
-		fN := int16(Id / Me.rowsPerFile)
-		if _, ok := Me.dataFps[fN]; !ok {
-			if err := Me.initFpData(fN); err != nil {
+		if _, ok := Me.dataFps[KeyUDiskIndex.DataFileIndex]; !ok {
+			if err := Me.initFpData(KeyUDiskIndex.DataFileIndex); err != nil {
 				return nil, errors.New("内容文件初始化获取失败+" + err.Error())
 			}
 		}
-		// 读取文件内容
-		if _, err := Me.dataFps[fN].Seek(KeyOffset, 0); err != nil {
+		// 读取头信息
+		var Length int32
+		var Buff []byte
+		if _, err := Me.dataFps[KeyUDiskIndex.DataFileIndex].Seek(KeyUDiskIndex.DataOffset, 0); err != nil {
 			log.Panic("取数据内容seek失败：" + err.Error())
 			return nil, errors.New("内容文件指针移位失败+" + err.Error())
+		} else {
+			Buff, err := Me.fileReadLength(Me.dataFps[KeyUDiskIndex.DataFileIndex], 6)
+			if err != nil {
+				return nil, errors.New("内容文件内容读取失败+" + err.Error())
+			}
+			if DataStart := utilsBytes2Int16(Buff[:2]); DataStart != Me.DataStart {
+				log.Panic("读取内容数据校验码失败")
+			}
+			Length = utilsBytes2Int32(Buff[2:6])
 		}
-		buff, err := Me.fileReadLength(Me.dataFps[fN], int(KeyDataLength)+2)
-		if err != nil {
+
+		// 读取内容
+		if buff2, err := Me.fileReadLength(Me.dataFps[KeyUDiskIndex.DataFileIndex], int(Length)); err != nil {
 			return nil, errors.New("内容文件内容读取失败+" + err.Error())
+		} else {
+			KeyUDiskData = utilsDecodeUDiskData(append(Buff, buff2...))
 		}
-		DataStart := utilsBytes2Int16(buff[:2])
-		if DataStart != Me.DataStart {
-			log.Panic("读取内容数据校验码失败")
-		}
-		KeyDataBuff = buff[2:]
+
 	}
 
-	return &UData{
+	return &UDataSend{
 		Date:          Me.date,
 		Id:            Id,
-		DataFileIndex: KeyDataFileIndex,
-		DataOffset:    KeyOffset,
-		DataType:      KeyDataType,
-		DataLength:    KeyDataLength,
-		Data:          KeyDataBuff,
+		DataFileIndex: KeyUDiskIndex.DataFileIndex,
+		DataOffset:    KeyUDiskIndex.DataOffset,
+		DataType:      KeyUDiskIndex.DataType,
+		DataLength:    KeyUDiskData.DataLength,
+		Data:          KeyUDiskData.Data,
 	}, nil
+}
+
+// 设置同步完成标记
+func (Me *CFileLog) SetFinish() {
+	// 判断日期目录是否存在
+	folderDate, err := Me.getLogDateFolder()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// 判断finish文件
+	f := folderDate + "/finish"
+	if _, err := os.Stat(f); os.IsNotExist(err) {
+		fp, err := os.OpenFile(f, os.O_RDWR|os.O_CREATE, 0644) // 打开文件
+		if err != nil {
+			log.Panic(err)
+		}
+		_ = fp.Close()
+	}
+}
+
+// 读取同步完成标记
+func (Me *CFileLog) GetFinish() bool {
+	// 判断日期目录是否存在
+	folderDate, err := Me.getLogDateFolder()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	// 判断finish文件
+	f := folderDate + "/finish"
+	if _, err := os.Stat(f); os.IsNotExist(err) {
+		// 判断是否close状态
+		if Me.date < time.Now().Format("2006-01-02") {
+			return true
+		} else {
+			return false
+		}
+	} else {
+		return true
+	}
 }
 
 // 辅助函数1：初始化内容文件句柄
@@ -248,7 +308,7 @@ func (Me *CFileLog) initAutoId() error {
 		return err
 	}
 	fi, _ := Me.indexFp.Stat()
-	Me.AutoId = fi.Size() / 16
+	Me.AutoId = fi.Size() / 12
 	Me.DataFileIndex = int16(Me.AutoId / Me.rowsPerFile)
 
 	// 初始化内容文件偏移量

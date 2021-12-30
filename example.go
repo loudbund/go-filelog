@@ -9,6 +9,9 @@ import (
 func main() {
 	write()
 	scan()
+	getFinish()
+	setFinish()
+	getFinish()
 }
 
 // 测试日志写入
@@ -16,7 +19,7 @@ func write() {
 	defer func(T time.Time) { fmt.Println(time.Since(T)) }(time.Now())
 
 	// 1、获取句柄
-	handle := filelog_v1.New("/tmp/test-filelog/", "2021-12-28")
+	handle := filelog_v1.New("/tmp/test-filelog/", time.Now().Format("2006-01-02"))
 
 	// 2、循环写入一批数据
 	for i := 0; i < 11; i++ {
@@ -30,7 +33,7 @@ func write() {
 // 测试日志遍历读取
 func scan() {
 	// 1、获取句柄
-	handle := filelog_v1.New("/tmp/test-filelog/", "2021-12-28")
+	handle := filelog_v1.New("/tmp/test-filelog/", time.Now().Format("2006-01-02"))
 
 	// 2、遍历所有数据
 	index := int64(0)
@@ -48,4 +51,12 @@ func scan() {
 	}
 	handle.Close()
 	fmt.Println(handle.GetOne(0))
+}
+func getFinish() {
+	handle := filelog_v1.New("/tmp/test-filelog/", time.Now().Format("2006-01-02"))
+	fmt.Println("finish:", handle.GetFinish())
+}
+func setFinish() {
+	handle := filelog_v1.New("/tmp/test-filelog/", time.Now().Format("2006-01-02"))
+	handle.SetFinish()
 }

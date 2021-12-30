@@ -5,6 +5,35 @@ import (
 	"encoding/binary"
 )
 
+func utilsEncodeUDiskIndex(Data *UDiskIndex) []byte {
+	b := bytes.NewBuffer([]byte{})
+	b.Write(utilsInt16ToBytes(Data.DataFileIndex)) // 索引文件序号
+	b.Write(utilsInt64ToBytes(Data.DataOffset))    // 存储文件偏移量
+	b.Write(utilsInt16ToBytes(Data.DataType))      // 数据内容类型
+	return b.Bytes()
+}
+func utilsDecodeUDiskIndex(Bytes []byte) *UDiskIndex {
+	return &UDiskIndex{
+		DataFileIndex: int16(binary.BigEndian.Uint16(Bytes[:2])),
+		DataOffset:    int64(binary.BigEndian.Uint16(Bytes[2:10])),
+		DataType:      int16(binary.BigEndian.Uint16(Bytes[10:12])),
+	}
+}
+func utilsEncodeUDiskData(Data *UDiskData) []byte {
+	b := bytes.NewBuffer([]byte{})
+	b.Write(utilsInt16ToBytes(Data.DataStart))  // 索引文件序号
+	b.Write(utilsInt32ToBytes(Data.DataLength)) // 存储文件偏移量
+	b.Write(Data.Data)                          // 数据内容类型
+	return b.Bytes()
+}
+func utilsDecodeUDiskData(Bytes []byte) *UDiskData {
+	return &UDiskData{
+		DataStart:  int16(binary.BigEndian.Uint16(Bytes[:2])),
+		DataLength: int32(binary.BigEndian.Uint16(Bytes[2:6])),
+		Data:       Bytes[6:],
+	}
+}
+
 // 数字类型转换1： int转[]byte
 func utilsInt2Bytes(n int) []byte {
 	x := int32(n)
