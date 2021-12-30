@@ -12,20 +12,23 @@ import (
 
 // 结构体1: 读取内容的结构体
 type UData struct {
-	Date       string // 日期:2021-12-12
-	Id         int64  // 流水号
-	DataType   int16  // 数据类型
-	DataLength int32  // 内容长度
-	DataOffset int64  // 相对存储文件偏移量
-	Data       []byte // 内容
+	Date          string // 日期:2021-12-12
+	Id            int64  // 流水号，从0开始
+	DataFileIndex int16  // 数据文件序号
+	DataOffset    int64  // 相对存储文件偏移量
+	DataType      int16  // 数据类型
+	DataLength    int32  // 内容长度
+	Data          []byte // 内容
 }
 
 // 结构体2： 日志操作结构体
 type CFileLog struct {
-	AutoId  int64            // 流水id，从0开始
-	indexFp *os.File         // 索引文件句柄
-	dataFps map[int]*os.File // 日志数据文件句柄数组，键值为数据文件编号
-	dataPos map[int]int64    // 日志数据文件位置数组，键值为数据文件编号
+	AutoId        int64 // 当前流水id，从0开始
+	DataFileIndex int16 // 当前数据文件序号
+	DataOffset    int64 // 当前数据文件偏移量
+
+	indexFp *os.File           // 索引文件句柄
+	dataFps map[int16]*os.File // 日志数据文件句柄数组，键值为数据文件编号
 
 	date        string // 日期:2021-12-12
 	folderLog   string // 日志文件所在目录
@@ -35,12 +38,15 @@ type CFileLog struct {
 // 函数1：获取日志操作实例
 func New(Folder string, Date string) *CFileLog {
 	return &CFileLog{
-		folderLog:   Folder,
+		AutoId:        -1,
+		DataFileIndex: -1,
+		DataOffset:    0,
+
+		indexFp: nil,
+		dataFps: map[int16]*os.File{},
+
 		date:        Date,
-		indexFp:     nil,
-		dataFps:     map[int]*os.File{},
-		dataPos:     map[int]int64{},
-		AutoId:      -1,
+		folderLog:   Folder,
 		rowsPerFile: 1000000,
 	}
 }
@@ -82,7 +88,7 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	// AutoId变量判断处理
 	if Me.AutoId == -1 {
 		err = Me.initAutoId()
-		fmt.Println(Me.AutoId)
+		fmt.Println("AutoId:", Me.AutoId)
 		if err != nil {
 			return -1, err
 		}
@@ -96,7 +102,7 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	}
 
 	// 内容文件文件序号
-	KeyDataFileIndex := int(Me.AutoId / Me.rowsPerFile)
+	KeyDataFileIndex := int16(Me.AutoId / Me.rowsPerFile)
 	if _, ok := Me.dataFps[KeyDataFileIndex]; !ok {
 		if err := Me.initFpData(KeyDataFileIndex); err != nil {
 			return -1, err
@@ -107,26 +113,28 @@ func (Me *CFileLog) Add(DataType int16, Data []byte) (int64, error) {
 	KeyDataLen := len(Data)
 
 	// 写入索引
-	if _, err = Me.indexFp.Seek(Me.AutoId*14, 0); err != nil {
+	if _, err = Me.indexFp.Seek(Me.AutoId*16, 0); err != nil {
 		return -1, err
 	} else {
 		b := bytes.NewBuffer([]byte{})
-		b.Write(Me.int16ToBytes(DataType))                     // 数据内容类型
-		b.Write(Me.int32ToBytes(int32(KeyDataLen)))            // 数据长度
-		b.Write(Me.int64ToBytes(Me.dataPos[KeyDataFileIndex])) // 存储文件偏移量
+		b.Write(utilsInt16ToBytes(KeyDataFileIndex))  // 索引文件序号
+		b.Write(utilsInt64ToBytes(Me.DataOffset))     // 存储文件偏移量
+		b.Write(utilsInt16ToBytes(DataType))          // 数据内容类型
+		b.Write(utilsInt32ToBytes(int32(KeyDataLen))) // 数据长度
 		if _, err := Me.indexFp.Write(b.Bytes()); err != nil {
 			return -1, err
 		}
 	}
+	// fmt.Println(KeyDataFileIndex, Me.DataOffset, DataType, int32(KeyDataLen))
 
 	// 写数据
-	if _, err = Me.dataFps[KeyDataFileIndex].Seek(Me.dataPos[KeyDataFileIndex], 0); err != nil {
+	if _, err = Me.dataFps[KeyDataFileIndex].Seek(Me.DataOffset, 0); err != nil {
 		return -1, err
 	} else {
 		if _, err := Me.dataFps[KeyDataFileIndex].Write(Data); err != nil {
 			return -1, err
 		}
-		Me.dataPos[KeyDataFileIndex] += int64(KeyDataLen)
+		Me.DataOffset += int64(KeyDataLen)
 	}
 
 	Me.AutoId++
@@ -148,13 +156,14 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 	}
 
 	// 获取索引
+	var KeyDataFileIndex int16
 	var KeyDataType int16
 	var KeyDataLength int32
 	var KeyOffset int64
-	if _, err := Me.indexFp.Seek(Id*14, 0); err != nil {
+	if _, err := Me.indexFp.Seek(Id*16, 0); err != nil {
 		return nil, errors.New("索引文件指针移位失败+" + err.Error())
 	} else {
-		buff, err := Me.fileReadLength(Me.indexFp, 14)
+		buff, err := Me.fileReadLength(Me.indexFp, 16)
 		if err != nil {
 			if err.Error() == "EOF" {
 				return nil, nil
@@ -162,15 +171,16 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 				return nil, errors.New("索引文件内容读取失败+" + err.Error())
 			}
 		}
-		KeyDataType = int16(binary.BigEndian.Uint16(buff[:2]))
-		KeyDataLength = int32(binary.BigEndian.Uint32(buff[2:6]))
-		KeyOffset = int64(binary.BigEndian.Uint64(buff[6:14]))
+		KeyDataFileIndex = int16(binary.BigEndian.Uint16(buff[:2]))
+		KeyOffset = int64(binary.BigEndian.Uint64(buff[2:10]))
+		KeyDataType = int16(binary.BigEndian.Uint16(buff[10:12]))
+		KeyDataLength = int32(binary.BigEndian.Uint32(buff[12:16]))
 	}
 
 	// 内容文件句柄
 	var KeyDataBuff []byte
 	if true {
-		fN := int(Id / Me.rowsPerFile)
+		fN := int16(Id / Me.rowsPerFile)
 		if _, ok := Me.dataFps[fN]; !ok {
 			if err := Me.initFpData(fN); err != nil {
 				return nil, errors.New("内容文件初始化获取失败+" + err.Error())
@@ -188,17 +198,18 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 	}
 
 	return &UData{
-		Date:       Me.date,
-		Id:         Id,
-		DataType:   KeyDataType,
-		DataLength: KeyDataLength,
-		DataOffset: KeyOffset,
-		Data:       KeyDataBuff,
+		Date:          Me.date,
+		Id:            Id,
+		DataFileIndex: KeyDataFileIndex,
+		DataOffset:    KeyOffset,
+		DataType:      KeyDataType,
+		DataLength:    KeyDataLength,
+		Data:          KeyDataBuff,
 	}, nil
 }
 
 // 辅助函数1：初始化内容文件句柄
-func (Me *CFileLog) initFpData(index int) error {
+func (Me *CFileLog) initFpData(index int16) error {
 	// 判断日期目录是否存在,没有将会创建
 	folderDate, err := Me.getLogDateFolder()
 	if err != nil {
@@ -206,15 +217,12 @@ func (Me *CFileLog) initFpData(index int) error {
 	}
 
 	// 打开内容文件
-	f := folderDate + "/data" + strings.Repeat("0", 6-len(strconv.Itoa(index))) + strconv.Itoa(index)
+	f := folderDate + "/data" + strings.Repeat("0", 6-len(strconv.Itoa(int(index)))) + strconv.Itoa(int(index))
 	fp, err := os.OpenFile(f, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644) // 打开文件
 	if err != nil {
 		return err
 	}
 	Me.dataFps[index] = fp
-
-	fi, _ := fp.Stat()
-	Me.dataPos[index] = fi.Size()
 
 	return nil
 }
@@ -225,7 +233,19 @@ func (Me *CFileLog) initAutoId() error {
 		return err
 	}
 	fi, _ := Me.indexFp.Stat()
-	Me.AutoId = fi.Size() / 14
+	Me.AutoId = fi.Size() / 16
+	Me.DataFileIndex = int16(Me.AutoId / Me.rowsPerFile)
+
+	// 初始化内容文件偏移量
+	if Me.AutoId == 0 {
+		Me.DataOffset = 0
+	} else {
+		if D, err := Me.GetOne(Me.AutoId - 1); err != nil {
+			fmt.Println("初始化读取当前AutoId数据失败", err)
+		} else {
+			Me.DataOffset = D.DataOffset
+		}
+	}
 
 	return nil
 }
@@ -283,60 +303,4 @@ func (Me *CFileLog) fileReadLength(fp *os.File, Length int) ([]byte, error) {
 		}
 	}
 	return retBuff, nil
-}
-
-// 数字类型转换1： int转[]byte
-func (Me *CFileLog) int2Bytes(n int) []byte {
-	x := int32(n)
-
-	bytesBuffer := bytes.NewBuffer([]byte{})
-	_ = binary.Write(bytesBuffer, binary.BigEndian, x)
-	return bytesBuffer.Bytes()
-}
-
-// 数字类型转换2： int16转[]byte
-func (Me *CFileLog) int16ToBytes(i int16) []byte {
-	var buf = make([]byte, 2)
-	binary.BigEndian.PutUint16(buf, uint16(i))
-	return buf
-}
-
-// 数字类型转换3： int32转[]byte
-func (Me *CFileLog) int32ToBytes(i int32) []byte {
-	var buf = make([]byte, 4)
-	binary.BigEndian.PutUint32(buf, uint32(i))
-	return buf
-}
-
-// 数字类型转换4： int64转[]byte
-func (Me *CFileLog) int64ToBytes(i int64) []byte {
-	var buf = make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, uint64(i))
-	return buf
-}
-
-// 数字类型转换5： []byte转int
-func (Me *CFileLog) bytes2Int(b []byte) int {
-	bytesBuffer := bytes.NewBuffer(b)
-
-	var x int32
-	_ = binary.Read(bytesBuffer, binary.BigEndian, &x)
-	binary.BigEndian.Uint32(b)
-
-	return int(x)
-}
-
-// 数字类型转换6： []byte转int16
-func (Me *CFileLog) bytes2Int16(buf []byte) int16 {
-	return int16(binary.BigEndian.Uint16(buf))
-}
-
-// 数字类型转换7： []byte转int32
-func (Me *CFileLog) bytes2Int32(buf []byte) int32 {
-	return int32(binary.BigEndian.Uint32(buf))
-}
-
-// 数字类型转换8： []byte转int64
-func (Me *CFileLog) bytes2Int64(buf []byte) int64 {
-	return int64(binary.BigEndian.Uint64(buf))
 }

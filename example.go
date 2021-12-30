@@ -20,7 +20,7 @@ func write() {
 
 	// 2、循环写入一批数据
 	for i := 0; i < 11; i++ {
-		_, err := handle.Add(0, []byte(time.Now().Format("2006-01-02 15:04:05")))
+		_, err := handle.Add(11, []byte(time.Now().Format("2006-01-02 15:04:05")))
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -43,7 +43,7 @@ func scan() {
 		if D == nil {
 			break
 		}
-		fmt.Println(index, D.DataType, string(D.Data), err)
+		fmt.Println(index, D.Id, D.DataFileIndex, D.DataOffset, D.DataLength, D.DataType, string(D.Data), err)
 		index++
 	}
 	handle.Close()
