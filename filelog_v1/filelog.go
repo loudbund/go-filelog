@@ -2,7 +2,6 @@ package filelog_v1
 
 import (
 	"errors"
-	"fmt"
 	log "github.com/sirupsen/logrus"
 	"os"
 	"strconv"
@@ -55,7 +54,7 @@ type CFileLog struct {
 
 // 函数1：获取日志操作实例
 func New(Folder string, Date string) *CFileLog {
-	return &CFileLog{
+	fileLog := &CFileLog{
 		AutoId:        -1,
 		DataFileIndex: -1,
 		DataOffset:    0,
@@ -69,6 +68,8 @@ func New(Folder string, Date string) *CFileLog {
 
 		DataStart: 19334,
 	}
+	fileLog.init()
+	return fileLog
 }
 
 // 函数2：关闭释放
@@ -89,12 +90,6 @@ func (Me *CFileLog) GetAutoId() (int64, error) {
 	if Me.AutoId == -2 {
 		return -1, errors.New("实例已关闭")
 	}
-	// 还没有位置，需要从文件读取
-	if Me.AutoId == -1 {
-		if err := Me.initAutoId(); err != nil {
-			return -1, err
-		}
-	}
 	return Me.AutoId, nil
 }
 
@@ -102,16 +97,6 @@ func (Me *CFileLog) GetAutoId() (int64, error) {
 func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) {
 	if Me.AutoId == -2 {
 		return -1, errors.New("实例已关闭")
-	}
-
-	var err error
-	// AutoId变量判断处理
-	if Me.AutoId == -1 {
-		err = Me.initAutoId()
-		fmt.Println("AutoId:", Me.AutoId)
-		if err != nil {
-			return -1, err
-		}
 	}
 
 	// 索引文件句柄判断处理
@@ -133,7 +118,7 @@ func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) 
 	KeyDataLength := len(Data)
 
 	// 写数据
-	if _, err = Me.dataFps[KeyDataFileIndex].Seek(Me.DataOffset, 0); err != nil {
+	if _, err := Me.dataFps[KeyDataFileIndex].Seek(Me.DataOffset, 0); err != nil {
 		log.Panic("写数据数据seek失败：" + err.Error())
 		return -1, err
 	} else {
@@ -149,7 +134,7 @@ func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) 
 	}
 
 	// 写入索引
-	if _, err = Me.indexFp.Seek(Me.AutoId*12, 0); err != nil {
+	if _, err := Me.indexFp.Seek(Me.AutoId*12, 0); err != nil {
 		log.Panic("写数据索引seek失败：" + err.Error())
 		return -1, err
 	} else {
@@ -286,29 +271,10 @@ func (Me *CFileLog) GetFinish() bool {
 	}
 }
 
-// 辅助函数1：初始化内容文件句柄
-func (Me *CFileLog) initFpData(index int16) error {
-	// 判断日期目录是否存在,没有将会创建
-	folderDate, err := Me.getLogDateFolder()
-	if err != nil {
-		return err
-	}
-
-	// 打开内容文件
-	f := folderDate + "/data" + strings.Repeat("0", 6-len(strconv.Itoa(int(index)))) + strconv.Itoa(int(index))
-	fp, err := os.OpenFile(f, os.O_RDWR|os.O_CREATE, 0644) // 打开文件
-	if err != nil {
-		return err
-	}
-	Me.dataFps[index] = fp
-
-	return nil
-}
-
-// 辅助函数2：初始化自增id
-func (Me *CFileLog) initAutoId() error {
+// 初始化
+func (Me *CFileLog) init() {
 	if err := Me.initFpIndex(); err != nil {
-		return err
+		log.Panic(err)
 	}
 	fi, _ := Me.indexFp.Stat()
 	Me.AutoId = fi.Size() / 12
@@ -324,8 +290,6 @@ func (Me *CFileLog) initAutoId() error {
 			Me.DataOffset = D.DataOffset + int64(D.DataLength) + 10
 		}
 	}
-
-	return nil
 }
 
 // 辅助函数3：初始化索引文件句柄
@@ -359,6 +323,25 @@ func (Me *CFileLog) getLogDateFolder() (string, error) {
 		}
 	}
 	return folderDate, nil
+}
+
+// 辅助函数1：初始化内容文件句柄
+func (Me *CFileLog) initFpData(index int16) error {
+	// 判断日期目录是否存在,没有将会创建
+	folderDate, err := Me.getLogDateFolder()
+	if err != nil {
+		return err
+	}
+
+	// 打开内容文件
+	f := folderDate + "/data" + strings.Repeat("0", 6-len(strconv.Itoa(int(index)))) + strconv.Itoa(int(index))
+	fp, err := os.OpenFile(f, os.O_RDWR|os.O_CREATE, 0644) // 打开文件
+	if err != nil {
+		return err
+	}
+	Me.dataFps[index] = fp
+
+	return nil
 }
 
 // 辅助函数5：读取指定长度数据
