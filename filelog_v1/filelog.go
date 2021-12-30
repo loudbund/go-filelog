@@ -12,6 +12,7 @@ import (
 
 // 结构体1: 读取内容的结构体
 type UData struct {
+	Date       string // 日期:2021-12-12
 	Id         int64  // 流水号
 	DataType   int16  // 数据类型
 	DataLength int32  // 内容长度
@@ -26,7 +27,7 @@ type CFileLog struct {
 	dataFps map[int]*os.File // 日志数据文件句柄数组，键值为数据文件编号
 	dataPos map[int]int64    // 日志数据文件位置数组，键值为数据文件编号
 
-	date        string // 日期
+	date        string // 日期:2021-12-12
 	folderLog   string // 日志文件所在目录
 	rowsPerFile int64  // 单个数据文件最大行数
 }
@@ -187,6 +188,7 @@ func (Me *CFileLog) GetOne(Id int64) (*UData, error) {
 	}
 
 	return &UData{
+		Date:       Me.date,
 		Id:         Id,
 		DataType:   KeyDataType,
 		DataLength: KeyDataLength,
