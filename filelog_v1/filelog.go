@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -49,7 +50,8 @@ type CFileLog struct {
 	folderLog   string // 日志文件所在目录
 	rowsPerFile int64  // 单个数据文件最大行数
 
-	DataStart int16 // 数据文件定位
+	DataStart int16        // 数据文件定位
+	lockAdd   sync.RWMutex // Add函数锁
 }
 
 // 函数1：获取日志操作实例
@@ -95,6 +97,9 @@ func (Me *CFileLog) GetAutoId() (int64, error) {
 
 // 函数4：新增一条日志
 func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) {
+	Me.lockAdd.Lock()
+	defer Me.lockAdd.Unlock()
+
 	if Me.AutoId == -2 {
 		return -1, errors.New("实例已关闭")
 	}
@@ -149,8 +154,13 @@ func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) 
 	}
 	// fmt.Println(KeyDataFileIndex, Me.DataOffset, DataType, int32(KeyDataLen))
 
-	Me.DataOffset += int64(KeyDataLength) + 10
 	Me.AutoId++
+	// 数据文件切换时，需要重置指针偏移量
+	if Me.AutoId%Me.rowsPerFile == 0 {
+		Me.DataOffset = 0
+	} else {
+		Me.DataOffset += int64(KeyDataLength) + 10
+	}
 
 	return Me.AutoId, nil
 }
@@ -281,7 +291,7 @@ func (Me *CFileLog) init() {
 	Me.DataFileIndex = int16(Me.AutoId / Me.rowsPerFile)
 
 	// 初始化内容文件偏移量
-	if Me.AutoId == 0 {
+	if Me.AutoId%Me.rowsPerFile == 0 {
 		Me.DataOffset = 0
 	} else {
 		if D, err := Me.GetOne(Me.AutoId - 1); err != nil {
