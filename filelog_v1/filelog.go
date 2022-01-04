@@ -260,7 +260,7 @@ func (Me *CFileLog) SetFinish() {
 }
 
 // 读取同步完成标记
-func (Me *CFileLog) GetFinish() bool {
+func (Me *CFileLog) GetFinish(asFinishFlag ...bool) bool {
 	// 判断日期目录是否存在
 	folderDate, err := Me.getLogDateFolder()
 	if err != nil {
@@ -270,11 +270,15 @@ func (Me *CFileLog) GetFinish() bool {
 	// 判断finish文件
 	f := folderDate + "/finish"
 	if _, err := os.Stat(f); os.IsNotExist(err) {
-		// 判断是否close状态
-		if Me.date < time.Now().Format("2006-01-02") {
-			return true
-		} else {
+		// 判断是否close状态,如果参数为true，则只判断finish文件状态不管日期
+		if len(asFinishFlag) > 0 && asFinishFlag[0] {
 			return false
+		} else {
+			if Me.date < time.Now().Format("2006-01-02") {
+				return true
+			} else {
+				return false
+			}
 		}
 	} else {
 		return true
