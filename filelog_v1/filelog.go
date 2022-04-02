@@ -165,7 +165,7 @@ func (Me *CFileLog) Add(Time int32, DataType int16, Data []byte) (int64, error) 
 	return Me.AutoId, nil
 }
 
-// 函数5：读取一条数据
+// 函数5：读取一条数据, 当返回的*UDataSend和error都是nil时，表示已读取到结尾了
 func (Me *CFileLog) GetOne(Id int64) (*UDataSend, error) {
 	if Me.AutoId == -2 {
 		return nil, errors.New("实例已关闭")
@@ -259,7 +259,11 @@ func (Me *CFileLog) SetFinish() {
 	}
 }
 
-// 读取同步完成标记
+// 读取同步完成标记,
+// 1、finish文件存在:返回true；
+// 2、文件不存在切参数为true，返回false
+// 3、文件不存在切参数为false，当Me.date日志日期小于机器日期时，返回true
+// 4、文件不存在切参数为false，当Me.date日志日期等于机器日期时，返回false
 func (Me *CFileLog) GetFinish(asFinishFlag ...bool) bool {
 	// 判断日期目录是否存在
 	folderDate, err := Me.getLogDateFolder()
@@ -285,7 +289,10 @@ func (Me *CFileLog) GetFinish(asFinishFlag ...bool) bool {
 	}
 }
 
-// 初始化
+// 初始化，
+// 初始化所有文件句柄、
+// 初始化日志文件自增id(通过所有文件大小计算)、
+// 初始化当前自增id对应数据文件序号
 func (Me *CFileLog) init() {
 	if err := Me.initFpIndex(); err != nil {
 		log.Panic(err)
@@ -306,16 +313,16 @@ func (Me *CFileLog) init() {
 	}
 }
 
-// 辅助函数3：初始化索引文件句柄
+// 辅助函数3：初始化索引文件句柄，文件不存在将创建文件
 func (Me *CFileLog) initFpIndex() error {
 	if Me.indexFp == nil {
-		// 判断日期目录是否存在
+		// 初始日期日志文件目录
 		folderDate, err := Me.getLogDateFolder()
 		if err != nil {
 			return err
 		}
 
-		// 打开文件
+		// 打开文件，赋值所有文件句柄变量
 		f := folderDate + "/index"
 		fpIndex, err := os.OpenFile(f, os.O_APPEND|os.O_RDWR|os.O_CREATE, 0644) // 打开文件
 		if err != nil {
@@ -326,7 +333,7 @@ func (Me *CFileLog) initFpIndex() error {
 	return nil
 }
 
-// 辅助函数4：获取日志文件夹
+// 辅助函数4：获取日志文件夹，不存在就创建一个
 func (Me *CFileLog) getLogDateFolder() (string, error) {
 	folderDate := strings.TrimRight(Me.folderLog, "/") + "/" + strings.ReplaceAll(Me.date, "-", "")
 	if _, err := os.Stat(folderDate); os.IsNotExist(err) {

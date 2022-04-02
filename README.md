@@ -13,6 +13,18 @@ import "github.com/loudbund/go-filelog/filelog_v1"
 ```
 
 ## 使用
+
+|序号|名称|函数|
+|:---:|---|---|
+|1|实例化一个日期日志句柄|filelog_v1.New(Folder string, Date string) *CFileLog |
+|2|关闭释放当前日期日志句柄|handle.Close() |
+|3|写入一条日志|handle.Add(Time int32, DataType int16, Data []byte) (int64, error)|
+|4|读出一条日志|handle.GetOne(Id int64) (*UDataSend, error)|
+|5|设置日期日志已结束|handle.SetFinish()|
+|6|读取日期日志已结束|handle.GetFinish(asFinishFlag ...bool) bool|
+|7|获取下一日志自增序号|handle.GetAutoId() (int64, error) |
+
+
 1、 获取操作句柄，一个日期一个句柄
 ```golang	
 handle := filelog_v1.New("/tmp/test-filelog/", "2021-12-28")
